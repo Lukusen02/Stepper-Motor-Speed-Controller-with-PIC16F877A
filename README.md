@@ -18,19 +18,8 @@ This project implements a speed control system for a unipolar stepper motor usin
 
 ## Schematic
 
-![Schematic](image.png)
+<img width="1176" height="749" alt="image" src="https://github.com/user-attachments/assets/befb213e-3920-4855-ac65-560ad7fce5ed" />
 
-*Figure: PIC16F877A connections, crystal, display, and input switches.*
-
-## Code
-
-The assembly code is optimized for clarity and efficiency. It includes:
-
-- Port and Timer0 initialization  
-- Lookup tables for 7‑segment decoding and motor step sequence  
-- Main loop: read switches, update display, wait for Timer0 overflow, then advance the motor step
-
-Source file: `motor_paso_a_paso.asm`
 
 ## Bill of Materials
 
@@ -58,14 +47,6 @@ Source file: `motor_paso_a_paso.asm`
    - `01` → Fast (3)  
 5. The 7‑segment display shows the selected speed, and the motor rotates continuously at that speed.
 
-## Demo Video
-
-[Watch on YouTube](https://youtube.com/shorts/1i0YtV_h4JI?si=n_nPDHH9ECQK7lxB)
-
-## Repository
-
-[https://github.com/samueldavidUPB/Codigo.git](https://github.com/samueldavidUPB/Codigo.git)
-
 ## Credits
 
 **Authors:** Juan Pablo González, Samuel David Martínez  
@@ -73,4 +54,3 @@ Source file: `motor_paso_a_paso.asm`
 **Professor:** Marcos R. Gómez Sierra  
 **Institution:** Universidad Pontificia Bolivariana – Montería Section
 
-*Adapted by: Saúl David Bertel Hoyos, Armando Potes Gutiérrez*
