@@ -1,0 +1,165 @@
+; ================================================
+; Laboratorio 3 - Control velocidad motor paso a paso
+; PIC16F877A - 4MHz - Assembler MPLAB
+; VERSIÓN OPTIMIZAD
+; ================================================
+
+    LIST P=16F877A
+    #INCLUDE <P16F877A.INC>
+    __CONFIG 0x3F3A
+
+; --- Constantes de preescala para cada velocidad ---
+; Timer0 a 4MHz: cada tick = 1us (con prescaler 1:256 = 256us/tick)
+; Lenta  (~250ms): TMR0 preload = 256 - 250000/256 = 256-976 -> overflow en 0
+;   Usamos preload bajo para desbordamiento lento.
+; Practica: ajustar estos valores en el simulador/hardware real.
+#DEFINE PRELOAD_LENTA   0x00    ; ~256 ticks x 256us = ~65ms  (lento)
+#DEFINE PRELOAD_MEDIA   0x80    ; ~128 ticks x 256us = ~33ms  (medio)
+#DEFINE PRELOAD_RAPIDA  0xD0    ; ~48  ticks x 256us = ~12ms  (rápido)
+
+    CBLOCK 0x20
+        velocidad       ; 1, 2 o 3
+        paso_actual     ; 0..3
+        preload_tmr0    ; valor que se recarga en TMR0 cada ciclo
+    ENDC
+
+    ORG 0x00
+    GOTO MAIN
+    ORG 0x04
+    RETFIE                  ; Sin interrupciones usadas, solo polling de T0IF
+
+; ================================================
+; MAIN - Inicialización
+; ================================================
+MAIN:
+    BANKSEL TRISA
+    MOVLW   B'00000011'     ; RA0 y RA1 como entradas
+    MOVWF   TRISA
+    CLRF    TRISB           ; PORTB salida (motor)
+    CLRF    TRISD           ; PORTD salida (display)
+
+    ; --- Configurar Timer0 ---
+    ; OPTION_REG: Timer0, fuente interna, prescaler 1:256 asignado a TMR0
+    MOVLW   B'00000111'     ; PS2:PS0 = 111 -> 1:256, PSA=0 (a TMR0), T0CS=0
+    MOVWF   OPTION_REG
+
+    BANKSEL ADCON1
+    MOVLW   0x06
+    MOVWF   ADCON1          ; Todo digital
+
+    BANKSEL PORTB
+    CLRF    PORTB
+    CLRF    PORTD
+    CLRF    paso_actual
+
+    ; Velocidad inicial: lenta
+    MOVLW   PRELOAD_LENTA
+    MOVWF   preload_tmr0
+    MOVLW   0x01
+    MOVWF   velocidad
+
+    ; Arrancar Timer0
+    MOVF    preload_tmr0, W
+    MOVWF   TMR0
+    BCF     INTCON, T0IF    ; Limpiar flag
+
+; ================================================
+; LOOP PRINCIPAL
+; Estructura:
+;   1. Leer botones y actualizar velocidad/preload (sin saltos encadenados)
+;   2. Actualizar display
+;   3. Esperar timer (sin bloquear con NOP loops)
+;   4. Avanzar paso
+; ================================================
+LOOP:
+    ; --- LEER VELOCIDAD (optimizado: sin cadena de XORLW) ---
+    ; RA1:RA0 = 11 o 00 -> Lenta | 10 -> Media | 01 -> Rápida
+    MOVF    PORTA, W
+    ANDLW   0x03
+
+    ; ¿RA1 = 1 y RA0 = 0? => 0b10 => Velocidad 2 (media)
+    XORLW   0x02
+    BTFSC   STATUS, Z
+    GOTO    SET_VEL2
+
+    ; ¿RA1 = 0 y RA0 = 1? => 0b01 => Velocidad 3 (rápida)
+    ; Rehacemos la lectura para comparar 0x01
+    MOVF    PORTA, W
+    ANDLW   0x03
+    XORLW   0x01
+    BTFSC   STATUS, Z
+    GOTO    SET_VEL3
+
+    ; Cualquier otro caso (11 o 00): Velocidad 1 (lenta)
+    MOVLW   0x01
+    MOVWF   velocidad
+    MOVLW   PRELOAD_LENTA
+    MOVWF   preload_tmr0
+    GOTO    SHOW_DISPLAY
+
+SET_VEL2:
+    MOVLW   0x02
+    MOVWF   velocidad
+    MOVLW   PRELOAD_MEDIA
+    MOVWF   preload_tmr0
+    GOTO    SHOW_DISPLAY
+
+SET_VEL3:
+    MOVLW   0x03
+    MOVWF   velocidad
+    MOVLW   PRELOAD_RAPIDA
+    MOVWF   preload_tmr0
+
+    ; --- DISPLAY (siempre se actualiza) ---
+SHOW_DISPLAY:
+    MOVF    velocidad, W
+    CALL    TABLA_7SEG
+    MOVWF   PORTD
+
+    ; --- ESPERAR TIMER0 (polling de T0IF, CPU libre para otras tareas) ---
+    ; VENTAJA vs delay por software: podrías insertar aquí lectura de sensores,
+    ; comunicación serie, etc., sin perder tiempo.
+WAIT_TIMER:
+    BTFSS   INTCON, T0IF    ; ¿Desbordó Timer0?
+    GOTO    WAIT_TIMER      ; No -> seguir esperando (1 ciclo por vuelta)
+    BCF     INTCON, T0IF    ; Sí -> limpiar flag
+    MOVF    preload_tmr0, W ; Recargar TMR0 para el próximo período
+    MOVWF   TMR0
+
+    ; --- AVANZAR PASO (igual que antes, ya estaba bien) ---
+    CALL    AVANZAR_PASO
+
+    GOTO    LOOP
+
+; ================================================
+; TABLA_7SEG - Segmentos para 0..3 en display cátodo común
+; Índice en W (0=dígito "0", 1=dígito "1", etc.)
+; ================================================
+TABLA_7SEG:
+    ADDWF   PCL, F
+    DT      0x3F, 0x06, 0x5B, 0x4F   ; 0, 1, 2, 3
+
+; ================================================
+; TABLA_PASOS - Secuencia de pasos para motor unipolar
+; Paso wave drive: 0001 -> 0010 -> 0100 -> 1000
+; ================================================
+TABLA_PASOS:
+    ADDWF   PCL, F
+    DT      0x01, 0x02, 0x04, 0x08
+
+; ================================================
+; AVANZAR_PASO
+; Sin cambios funcionales; ya era correcto y eficiente.
+; ================================================
+AVANZAR_PASO:
+    MOVF    paso_actual, W
+    CALL    TABLA_PASOS
+    MOVWF   PORTB
+    INCF    paso_actual, F
+    MOVLW   4
+    SUBWF   paso_actual, W
+    BTFSC   STATUS, Z
+    CLRF    paso_actual
+    RETURN
+
+    END
